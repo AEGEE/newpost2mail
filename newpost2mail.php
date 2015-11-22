@@ -64,7 +64,7 @@
 
     foreach (get_forum_parents($post_data) as $temp) {
       $post_FORUMPARENTS       .= $temp["0"]. " / ";
-      $post_FORUMPARENTS_laquo .= $temp["0"]. " &laquo; ";
+      $post_FORUMPARENTS_laquo .= $temp["0"]. " Â« ";
     }
 
 
@@ -131,88 +131,97 @@
       $headers .= "From: ". Mail_mimePart::encodeHeader("from", $from, "UTF-8") . "\n";
       $headers .= "X-Mailer: newpost2mail $version for phpBB3\n";
       $headers .= "MIME-Version: 1.0\n";
-      $headers .= "Content-type: text/html; charset=UTF-8\n";
+      $headers .= "Content-type: text/plain; charset=UTF-8; format=flowed\n";
 
 
 
       // build the email body
 
-      $message .= "<HTML>\n";
-      $message .= "<HEAD>\n";
-      $message .= "<base href='$board_url'>\n";
-      $message .= "<META http-equiv='content-type' content='text/html; charset=UTF-8'>\n";
+      $message = html_entity_decode(str_replace("<br />", "<br />\n",
+        generate_text_for_edit($data[message], $data[bbcode_uid],
+	                       $post_data[forum_desc_options])["text"])."\n\n");
 
+      //convert BBCode to text/plain; format=flowed
+      require_once 'JBBCode/Parser.php';
 
+      class QuoteWithOption extends JBBCode\CodeDefinition {
+        public function __construct() {
+          parent::__construct();
+          $this->setTagName("quote");
+          $this->useOption = true;
+        }
+        public function asHtml(JBBCode\ElementNode $el) {
+          $result = "\nQuote from " . $el->getAttribute()["quote"] . ":\n";
+          foreach (preg_split ("/\R/", $this->getContent($el)) as $line)
+            $result .= "> " . $line . "\n";
+          return $result . "\n";
+        }
+      }
 
-      // insert style definitions from newpost2mail.css
+      class QuoteWithoutOption extends JBBCode\CodeDefinition {
+        public function __construct() {
+          parent::__construct();
+          $this->setTagName("quote");
+        }
+        public function asHtml(JBBCode\ElementNode $el) {
+          $result = "\n";
+          foreach (preg_split ("/\R/", $this->getContent($el)) as $line)
+            $result .= "> " . $line . "\n";
+          return $result . "\n";
+        }
+      }
 
-      $message .= "<style type='text/css' media='screen'>\n";
-      $message .= file_get_contents($phpbb_root_path."newpost2mail.css");
-      $message .= "\n</style>\n";
+      $parser = new JBBCode\Parser();
 
-      $message .= "</HEAD>\n";
-      $message .= "<BODY>\n";
+      $builder = new JBBCode\CodeDefinitionBuilder('i', '/{param}/');
+      $parser->addCodeDefinition($builder->build());
+      $builder = new JBBCode\CodeDefinitionBuilder('u', '_{param}_');
+      $parser->addCodeDefinition($builder->build());
+      $builder = new JBBCode\CodeDefinitionBuilder('b', '*{param}*');
+      $parser->addCodeDefinition($builder->build());
+      $parser->addCodeDefinition(new QuoteWithOption());
+      $parser->addCodeDefinition(new QuoteWithoutOption());
+      $builder = new JBBCode\CodeDefinitionBuilder('code', '{param}');
+      $parser->addCodeDefinition($builder->build());
+      $builder = (new JBBCode\CodeDefinitionBuilder('color', '{param}'))->setUseOption(true);
+      $parser->addCodeDefinition($builder->build());
+      $builder = (new JBBCode\CodeDefinitionBuilder('size', '{param}'))->setUseOption(true);
+      $parser->addCodeDefinition($builder->build());
 
-
-
+      $parser->parse($message);
+      $message = $parser->getAsHtml();
       // build the informational table
 
-      $message .= "<table class='table_info'>\n";
-      $message .= "<tr><td>$phrase[user]</td><td>: <a href='$u_profile_url'><b>$post_USERNAME</b></a>";
-      if ($post_EDITOR) $message .= "&nbsp;&nbsp;-&raquo; $phrase[edited_by] <a href='$e_profile_url'><b>$post_EDITOR</b></a>";
-      if (($user->data['user_allow_viewemail']) or ($n2m_ALWAYS_SHOW_EMAIL)) $message .= " (<a href='mailto:". $user->data['user_email'] . "'>". $user->data['user_email'] ."</a>)";
-      $message .= "</td>\n</tr>\n";
-      $message .= "<tr><td>$phrase[subject]</td><td>: <a href='$post_url'><b>$post_SUBJECT</b></a></td></tr>\n";
-      $message .= "<tr><td>$phrase[thread]</td><td>: <a href='$thread_url'>$post_TOPICTITLE</a></td></tr>\n";
-      $message .= "<tr><td>$phrase[forum]</td><td>: <a href='$forum_url'>$post_FORUMPARENTS_laquo$post_FORUMNAME</a></td></tr>\n";
-      $message .= "<tr><td>$phrase[mode]</td><td>: $mode</td></tr>\n";
+      $message .= "$phrase[subject]: $post_SUBJECT\n";
+      $message .= "$phrase[thread]: $post_TOPICTITLE $thread_url\n";
+      $message .= "$phrase[forum] : $post_FORUMPARENTS_laquo$post_FORUMNAME $forum_url\n";
+      $message .= "$phrase[actions]:\n";
+      $message .= "  Reply address in the AEGEE Forum: " . $reply_url . "\n";
+      $message .= "  Post URL: " . $post_url . "\n";
+      $message .= "  Info URL: " . $info_url . "\n\n";
+
+      $message .= "--\nThis message is generated upon adding a new posting in the AEGEE Forum, https://www.aegee.org/forum . You can answer directly to the sender by clicking the reply button, if the sender has activated its @aegee.org address, and does not want to hide his/her identity, otherwise the sending address of this email does not exist.  Sending emails from the AEGEE forum is experimental.  Direct your feedback at forum@aegee.org .";
 
       if ($post_HOST == $post_IP) $post_HOST = $phrase[host_na];
-      $message .= "<tr><td>$phrase[ip_hostname]</td><td>: $post_IP / $post_HOST</td></tr>\n";
-      $message .= "<tr><td>$phrase[actions]</td><td>: [<a href='$reply_url'>$phrase[reply]</a>] [<a href='$quote_url'>$phrase[quote]</a>] [<a href='$edit_url'>$phrase[edit]</a>] [<a href='$delete_url'>$phrase[delete]</a>] [<a href='$info_url'>$phrase[info]</a>] [<a href='$pm_url'>$phrase[pm]</a>] [<a href='$email_url'>$phrase[email]</a>]</td></tr>\n";
-      $message .= "</table>\n";
-
-
-
       // build the post text table
-
-      $message .= "<table class='table_post' width='$n2m_WIDTH'>\n";
-      $message .= "<tr><td><div class='content'>\n";
-
-
 
       // search for inline attachments to show them in the post text
 
       if (!empty($data[attachment_data])) parse_attachments($data[forum_id], $data[message], $data[attachment_data], $dummy, true);
 
 
+
       // generate post text
-
-      $message .= str_replace("<br />", "<br />\n", generate_text_for_display($data[message], $data[bbcode_uid], $data[bbcode_bitfield], $post_data[forum_desc_options]))."\n";
-
 
 
       // show attachments if not already shown in the post text
 
       if (!empty($data[attachment_data])) {
-        $message .= "<br />\n<dl class='attachbox'><dt>$phrase[attachments]:</dt><dd>\n";
+        $message .= "$phrase[attachments]:\n";
         foreach ($data[attachment_data] as $filename) {
-          $message .= print_r($filename, 1);
+          $message .= "  " . print_r($filename, 1) . "\n";
         }
-        $message .= "</dl>\n";
-      }
-
-
-      // convert relative smily attachment to absolute url
-
-      $message = str_replace("./download/file.php?id=", $board_url."download/file.php?id=", $message);
-
-
-      // 3rd party edit
-
-      if ($post_data[post_edit_reason]) {
-        $post_EDITOR ? $edited_by = $post_EDITOR : $edited_by = $post_USERNAME;
-        $message .= "<div class='notice'>-&raquo; $phrase[edited_by] $edited_by, $phrase[edit_reason]: <em>$post_data[post_edit_reason]</em></div>\n";
+        $message .= "\n";
       }
 
 
@@ -221,88 +230,16 @@
       if ($n2m_SHOW_SIG) {
         if ($mode != "edit") {
           if ( ($user->data[user_sig]) and ($data[enable_sig]) ) {
-            $message .= "<div class='signature'>";
-            $message .= generate_text_for_display($user->data[user_sig], $user->data[user_sig_bbcode_uid], $user->data[user_sig_bbcode_bitfield], $post_data[forum_desc_options])."\n";
-            $message .= "</div>\n";
-          }
-        } else {
-          if ( ($post_data[user_sig]) and ($post_data[enable_sig]) and ($n2m_SHOW_SIG)) {
-            $message .= "<div class='signature'>\n";
-            $message .= generate_text_for_display($post_data[user_sig], $post_data[user_sig_bbcode_uid], $post_data[user_sig_bbcode_bitfield], $post_data[forum_desc_options])."\n";
-            $message .= "</div>\n";
+            $message .= "\nSignature:\n  ";
+            $message .= generate_text_for_edit($user->data[user_sig], $user->data[user_sig_bbcode_uid], $post_data[forum_desc_options])["text"] ."\n\n";
           }
         }
       }
 
 
-      // convert relative smily url to absolute url
-
-      $message = str_replace("./$config[smilies_path]", "$board_url$config[smilies_path]", $message);
-
-      $message .= "</div></td></tr></table>\n";
-
-
-
-      // ask for donation and build an own table for that :)
-
-      $paypal_USD = "https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=stefan%40hendricks%2donline%2ede&item_name=newpost2mail%20for%20phpBB3&no_shipping=1&tax=0&currency_code=USD&bn=PP%2dDonationsBF&charset=UTF%2d8&lc=$lang";
-      $paypal_EUR = "https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=stefan%40hendricks%2donline%2ede&item_name=newpost2mail%20for%20phpBB3&no_shipping=1&tax=0&currency_code=EUR&bn=PP%2dDonationsBF&charset=UTF%2d8&lc=$lang";
-
-      $message .= "<table class='table_version' width='$n2m_WIDTH'>\n";
-      $message .= "<tr><td align='center'>";
-
-      if ($lang == "de") {
-        $message .= utf8_encode("Diese E-Mail wurde von <i>newpost2mail $version</i> für phpBB3 versendet.<br >Dokumentationen &amp; Updates finden Sie unter <a href='http://henmedia.de'>http://henmedia.de</a>.<br /><br />");
-        $message .= utf8_encode("Wenn Sie diese Erweiterung nützlich finden, dann können Sie deren<br />Entwicklung mit einer <a href='$paypal_EUR'>PayPal-Spende</a> unterstützen - vielen Dank :-)\n");
-      } else {
-        $message .= "This message was sent by <i>newpost2mail $version</i> for phpBB3.<br />Visit <a href='http://henmedia.de'>http://henmedia.de</a> for updates and documentation.<br /><br />";
-        $message .= "If you find this MOD useful, you can support this project using PayPal.<br>To make a donation click here: <a href='$paypal_USD'>donate USD</a> / <a href='$paypal_EUR'>donate EUR</a> - thank you :-)\n";
-      }
-
-      $message .= "</td></tr></table>\n";
-
-      // end donation
-
-
-
-      $message .= "</BODY></HTML>\n";
-
-      $message = wordwrap($message, 256);
-
-
       // encode subject
 
       $subject = mail_encode(html_entity_decode($n2m_SUBJECT));
-
-
-      // fix for phpBB 3.05 !
-      $subject = str_replace("\r", "", $subject);
-      $subject = str_replace("\n", "", $subject);
-
-
-
-      // send email to board contact address?
-
-      if ($n2m_MAILTO_BOARDCONTACT) $n2m_MAILTO[] = $config[board_contact];
-
-
-
-      // send email to group?
-
-      foreach ($n2m_MAILTO_GROUP as $group) {
-        $sql = $db->sql_build_query('SELECT', array('SELECT'  => 'u.user_email',
-                                                    'FROM'    => array(USERS_TABLE => 'u', GROUPS_TABLE => 'g', USER_GROUP_TABLE => 'ug'),
-                                                    'WHERE'   => 'ug.group_id = g.group_id AND ug.user_id = u.user_id AND u.user_email != \'\' AND lower(g.group_name) = \'' . strtolower($group) . '\''));
-        $result = $db->sql_query($sql);
-        while ($row = $db->sql_fetchrow($result)) $n2m_MAILTO[] = $row['user_email'];
-        $db->sql_freeresult($result);
-      }
-
-
-
-      // add recipients by forum
-
-      if (is_array($n2m_MONITOR_FORUM[$data[forum_id]])) $n2m_MAILTO = array_merge($n2m_MAILTO, $n2m_MONITOR_FORUM[$data[forum_id]]);
 
 
 
@@ -329,6 +266,11 @@
 
       // die($message); // for debugging purposes, mail will be shown in browser and not sent out if we uncomment this line
 
+      // make text "flow" in plain/text
+
+      $temp = $message; $message = '';
+      foreach (preg_split ("/\R/", $temp) as $line)
+        $message .= wordwrap($line, 75, $line[0] == ">" ? " \r\n>" : " \r\n") . "\r\n";
 
 
       // and finally send the mails

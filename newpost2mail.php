@@ -1,5 +1,6 @@
 <?php
 
+  require_once('Mail/mimePart.php');
 
   // newpost2mail beta 21 for phpBB3 by Stefan Hendricks
   // See http://henmedia.de for latest version
@@ -124,7 +125,10 @@
       include_once($phpbb_root_path . 'includes/functions_messenger.' . $phpEx);
 
       $headers .= "Date: ".date("D, j M Y H:i:s O")."\n";
-      $headers .= "From: \"".mail_encode(html_entity_decode($config[sitename]))."\" <$config[board_email]>\n";
+      $from = html_entity_decode($user->data['username']) . " <" .
+       (($user->data['user_allow_viewemail'] or $n2m_ALWAYS_SHOW_EMAIL)
+        ? $user->data['user_email'] : $user->data['username'] . "@aegee.org")  . ">";
+      $headers .= "From: ". Mail_mimePart::encodeHeader("from", $from, "UTF-8") . "\n";
       $headers .= "X-Mailer: newpost2mail $version for phpBB3\n";
       $headers .= "MIME-Version: 1.0\n";
       $headers .= "Content-type: text/html; charset=UTF-8\n";
